@@ -2,7 +2,7 @@
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { FloatingGlowPanel, PageContainer, SectionHeader } from "@/components/shared";
 import { motion } from "framer-motion";
-import { Settings as SettingsIcon, Bell, Brain, Palette, Clock, Shield, Link2, Check } from "lucide-react";
+import { Bell, Brain, Clock, Link2, Check } from "lucide-react";
 
 const GithubIcon = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
