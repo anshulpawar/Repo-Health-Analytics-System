@@ -102,6 +102,18 @@ services:
       - repo_cache:/tmp/repo_cache
     command: celery -A app.tasks.celery_app.celery_app worker --loglevel=info --concurrency=2
 
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
 volumes:
   postgres_data:
   redis_data:

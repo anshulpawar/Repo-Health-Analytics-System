@@ -2,10 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { AnalysisJob, api, RepositoryOverview } from "@/lib/api";
+import { AnalysisJob, api, RepositoryOverview, subscribeJobStatus } from "@/lib/api";
 
 const STORAGE_KEY = "rhi:selected_repository_id";
 const JOB_STORAGE_KEY = "rhi:active_job_id";
+
+const TERMINAL_JOB_STATUSES = new Set<AnalysisJob["status"]>(["completed", "failed"]);
 
 interface RepositoryContextValue {
   repositoryId: number | null;
@@ -26,7 +28,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   const [repositoryId, setRepositoryIdState] = useState<number | null>(null);
   const [repositoryOverview, setRepositoryOverview] = useState<RepositoryOverview | null>(null);
   const [currentJob, setCurrentJob] = useState<AnalysisJob | null>(null);
-  const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const [trackedJobId, setTrackedJobId] = useState<number | null>(null);
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [loadingJob, setLoadingJob] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
     if (storedJob) {
       const parsed = Number(storedJob);
       if (!Number.isNaN(parsed)) {
-        setActiveJobId(parsed);
+        setTrackedJobId(parsed);
       }
     }
   }, []);
@@ -54,7 +56,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       window.localStorage.removeItem(STORAGE_KEY);
       setRepositoryOverview(null);
       setCurrentJob(null);
-      setActiveJobId(null);
+      setTrackedJobId(null);
       window.localStorage.removeItem(JOB_STORAGE_KEY);
       return;
     }
@@ -79,14 +81,14 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   }, [repositoryId]);
 
   const refreshJob = useCallback(async () => {
-    const jobId = currentJob?.id ?? activeJobId;
+    const jobId = trackedJobId ?? currentJob?.id;
     if (!jobId) return;
     setLoadingJob(true);
     try {
       const job = await api.getJob(jobId);
       setCurrentJob(job);
-      if (job.status === "completed" || job.status === "failed") {
-        setActiveJobId(null);
+      if (TERMINAL_JOB_STATUSES.has(job.status)) {
+        setTrackedJobId(null);
         window.localStorage.removeItem(JOB_STORAGE_KEY);
       }
     } catch (err) {
@@ -94,7 +96,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
     } finally {
       setLoadingJob(false);
     }
-  }, [activeJobId, currentJob?.id]);
+  }, [currentJob?.id, trackedJobId]);
 
   useEffect(() => {
     if (!repositoryId) return;
@@ -103,46 +105,71 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     if (!repositoryId) return;
-    let interval: NodeJS.Timeout | null = null;
-    const hydrate = async () => {
+    let cancelled = false;
+
+    const hydrateLatestJob = async () => {
       try {
         const latest = await api.getLatestRepositoryJob(repositoryId);
+        if (cancelled) return;
         setCurrentJob(latest);
-        setActiveJobId(latest.id);
+        if (!TERMINAL_JOB_STATUSES.has(latest.status)) {
+          setTrackedJobId(latest.id);
+          window.localStorage.setItem(JOB_STORAGE_KEY, String(latest.id));
+        }
       } catch {
-        // No jobs yet for repository.
+        // No jobs yet for this repository.
       }
     };
-    hydrate();
-    interval = setInterval(() => {
-      setCurrentJob((job) => {
-        if (!job) return job;
-        if (job.status === "completed" || job.status === "failed") return job;
-        refreshJob();
-        return job;
-      });
-    }, 2000);
+
+    void hydrateLatestJob();
     return () => {
-      if (interval) clearInterval(interval);
+      cancelled = true;
     };
-  }, [repositoryId, refreshJob]);
+  }, [repositoryId]);
 
   useEffect(() => {
-    if (!currentJob?.id) return;
-    if (currentJob.status === "completed") {
+    const jobId = trackedJobId;
+    if (!jobId) return;
+
+    setLoadingJob(true);
+    const unsubscribe = subscribeJobStatus(
+      jobId,
+      (job) => {
+        setCurrentJob(job);
+        setLoadingJob(false);
+        setError(null);
+        if (TERMINAL_JOB_STATUSES.has(job.status)) {
+          setTrackedJobId(null);
+          window.localStorage.removeItem(JOB_STORAGE_KEY);
+        }
+      },
+      (err) => {
+        setLoadingJob(false);
+        setError(err.message);
+      }
+    );
+
+    return unsubscribe;
+  }, [trackedJobId]);
+
+  useEffect(() => {
+    if (currentJob?.status === "completed") {
       refreshOverview();
     }
   }, [currentJob?.status, currentJob?.id, refreshOverview]);
 
-  const startAnalysis = useCallback(async (repoUrl: string) => {
-    setError(null);
-    const response = await api.analyzeRepository({ url: repoUrl });
-    setRepositoryId(response.repository_id);
-    const startedJob = await api.getJob(response.job_id);
-    setCurrentJob(startedJob);
-    setActiveJobId(startedJob.id);
-    window.localStorage.setItem(JOB_STORAGE_KEY, String(startedJob.id));
-  }, [setRepositoryId]);
+  const startAnalysis = useCallback(
+    async (repoUrl: string) => {
+      setError(null);
+      const response = await api.analyzeRepository({ url: repoUrl });
+      setRepositoryId(response.repository_id);
+      const startedJob = await api.getJob(response.job_id);
+      setCurrentJob(startedJob);
+      setTrackedJobId(startedJob.id);
+      window.localStorage.setItem(JOB_STORAGE_KEY, String(startedJob.id));
+    },
+    [setRepositoryId]
+  );
 
   const value = useMemo<RepositoryContextValue>(
     () => ({
