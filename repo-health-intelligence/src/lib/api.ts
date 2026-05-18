@@ -7,10 +7,111 @@ export type AnalysisJobStatus =
   | "completed"
   | "failed";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+/** Resolves API root; uses same-origin proxy in the browser when env is unset. */
+export function getApiBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}/api/v1`;
+  }
+  return "http://localhost:8000/api/v1";
+}
+
+function getApiOrigin(): string {
+  const base = getApiBaseUrl();
+  return base.replace(/\/api\/v1\/?$/, "");
+}
+
+function getJobWebSocketUrl(jobId: number): string {
+  const base = getApiBaseUrl();
+  const url = new URL(base.endsWith("/api/v1") ? base : `${base}/api/v1`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return `${url.origin}${url.pathname.replace(/\/$/, "")}/jobs/${jobId}/ws`;
+}
+
+export async function checkHealth(): Promise<{ ok: boolean; status?: string; error?: string }> {
+  try {
+    const response = await fetch(`${getApiOrigin()}/api/v1/healthz`, { cache: "no-store" });
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status}` };
+    }
+    const data = (await response.json()) as { status?: string };
+    return { ok: data.status === "ok", status: data.status };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Backend unreachable" };
+  }
+}
+
+export function subscribeJobStatus(
+  jobId: number,
+  onUpdate: (job: AnalysisJob) => void,
+  onError?: (error: Error) => void
+): () => void {
+  let closed = false;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let socket: WebSocket | null = null;
+
+  const poll = async () => {
+    try {
+      const job = await apiRequest<AnalysisJob>(`/jobs/${jobId}`);
+      onUpdate(job);
+      if (job.status === "completed" || job.status === "failed") {
+        cleanup();
+      }
+    } catch (err) {
+      onError?.(err instanceof Error ? err : new Error("Failed to poll job status"));
+    }
+  };
+
+  const startPolling = () => {
+    if (pollTimer || closed) return;
+    void poll();
+    pollTimer = setInterval(() => void poll(), 2000);
+  };
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    socket?.close();
+    socket = null;
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  };
+
+  try {
+    socket = new WebSocket(getJobWebSocketUrl(jobId));
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data as string) as AnalysisJob | { status: "not_found"; job_id: number };
+        if ("status" in payload && payload.status === "not_found") return;
+        onUpdate(payload as AnalysisJob);
+        if (payload.status === "completed" || payload.status === "failed") {
+          cleanup();
+        }
+      } catch (err) {
+        onError?.(err instanceof Error ? err : new Error("Invalid job status payload"));
+      }
+    };
+    socket.onerror = () => {
+      socket?.close();
+      socket = null;
+      startPolling();
+    };
+    socket.onclose = () => {
+      if (!closed) startPolling();
+    };
+  } catch {
+    startPolling();
+  }
+
+  return cleanup;
+}
 
 async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",

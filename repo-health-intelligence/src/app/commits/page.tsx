@@ -1,19 +1,38 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { Search, Filter, GitCommitHorizontal, Calendar } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { CommitCard } from "@/components/commit-card";
 import { EmptyRepositoryState, LoadingState } from "@/components/data-state";
 import { FloatingGlowPanel, PageContainer, SectionHeader } from "@/components/shared";
 import { useRepositoryContext } from "@/context/repository-context";
 import { useApiData } from "@/hooks/use-api-data";
-import { api } from "@/lib/api";
-import { motion } from "framer-motion";
-import { Search, Filter, GitCommitHorizontal, Calendar } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { api, CommitData } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+type ImpactFilter = "all" | CommitData["architecture_impact"];
+
+const IMPACT_OPTIONS: Array<{ value: ImpactFilter; label: string }> = [
+  { value: "all", label: "All impact" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+  { value: "none", label: "None" },
+];
 
 export default function CommitsPage() {
   const { repositoryId, currentJob } = useRepositoryContext();
   const hasRepository = !!repositoryId;
+
+  const [search, setSearch] = useState("");
+  const [impactFilter, setImpactFilter] = useState<ImpactFilter>("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const commitsQuery = useApiData(
     repositoryId ? () => api.getCommits(repositoryId, 1, 50) : null,
@@ -26,6 +45,30 @@ export default function CommitsPage() {
 
   const commits = commitsQuery.data?.items ?? [];
   const stats = statsQuery.data;
+
+  const filteredCommits = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const from = dateFrom ? new Date(dateFrom) : null;
+    const to = dateTo ? new Date(dateTo) : null;
+    if (to) to.setHours(23, 59, 59, 999);
+
+    return commits.filter((commit) => {
+      if (impactFilter !== "all" && commit.architecture_impact !== impactFilter) return false;
+      if (from || to) {
+        const commitDate = new Date(commit.date);
+        if (from && commitDate < from) return false;
+        if (to && commitDate > to) return false;
+      }
+      if (!query) return true;
+      return (
+        commit.message.toLowerCase().includes(query) ||
+        commit.hash.toLowerCase().includes(query) ||
+        commit.author.name.toLowerCase().includes(query) ||
+        commit.author.email.toLowerCase().includes(query)
+      );
+    });
+  }, [commits, search, impactFilter, dateFrom, dateTo]);
+
   const activityData = (stats?.activity ?? []).map((item) => ({
     date: item.date.slice(5),
     commits: item.commits,
@@ -40,20 +83,86 @@ export default function CommitsPage() {
         {!hasRepository && <EmptyRepositoryState />}
         {hasRepository && (commitsQuery.loading || statsQuery.loading) && <LoadingState label="Loading commit analytics..." />}
 
-        <div className="flex flex-col sm:flex-row gap-3">
+        <motion.div layout className="flex flex-col sm:flex-row gap-3">
           <div className="flex items-center gap-2 flex-1 px-4 py-2.5 rounded-xl bg-white/5 border border-white/5">
             <Search className="w-4 h-4 text-muted-foreground" />
-            <input type="text" placeholder="Search commits by message, author, or hash..." className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search commits by message, author, or hash..."
+              className="bg-transparent text-sm outline-none w-full placeholder:text-muted-foreground/50"
+            />
           </div>
-          <button className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <button
+            type="button"
+            onClick={() => setShowFilters((v) => !v)}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm transition-colors",
+              showFilters ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300" : "bg-white/5 border-white/5 text-muted-foreground hover:text-foreground"
+            )}
+          >
             <Filter className="w-4 h-4" />
             Filters
           </button>
-          <button className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/5 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <Calendar className="w-4 h-4" />
-            Date Range
-          </button>
-        </div>
+        </motion.div>
+
+        {showFilters && (
+          <motion.div
+            layout
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            className="flex flex-col sm:flex-row gap-3 p-4 rounded-xl border border-white/5 bg-white/[0.02]"
+          >
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground flex-1">
+              Architecture impact
+              <select
+                value={impactFilter}
+                onChange={(e) => setImpactFilter(e.target.value as ImpactFilter)}
+                className="px-3 py-2 rounded-lg bg-white/5 border border-white/5 text-sm text-foreground outline-none"
+              >
+                {IMPACT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground flex-1">
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> From
+              </span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-white/5 border border-white/5 text-sm text-foreground outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground flex-1">
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3 h-3" /> To
+              </span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-white/5 border border-white/5 text-sm text-foreground outline-none"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setImpactFilter("all");
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="self-end px-4 py-2 rounded-lg bg-white/5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear filters
+            </button>
+          </motion.div>
+        )}
 
         <FloatingGlowPanel className="p-5" delay={0.1}>
           <SectionHeader title="Commit Activity" description="Daily commit volume and health impact" />
@@ -77,9 +186,19 @@ export default function CommitsPage() {
             { label: "Positive Impact", value: `${Math.round(stats?.positive_impact_ratio ?? 0)}%`, sub: "Health improving" },
             { label: "Avg. Complexity Delta", value: `${(stats?.avg_complexity_delta ?? 0).toFixed(1)}`, sub: "Per commit" },
           ].map((item, index) => (
-            <motion.div key={item.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }} className="rounded-xl border border-white/5 bg-card p-4 text-center">
-              <div className="text-xl font-bold">{item.value}</div>
-              <div className="text-xs text-muted-foreground">{item.label}</div>
+            <motion.div
+              key={item.label}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
+              className="rounded-xl border border-white/5 bg-card p-4 text-center"
+            >
+              <motion.div layout className="text-xl font-bold">
+                {item.value}
+              </motion.div>
+              <motion.div layout className="text-xs text-muted-foreground">
+                {item.label}
+              </motion.div>
               <div className="text-[10px] text-muted-foreground/60 mt-1">{item.sub}</div>
             </motion.div>
           ))}
@@ -92,12 +211,13 @@ export default function CommitsPage() {
             action={
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <GitCommitHorizontal className="w-3 h-3" />
-                {commits.length} commits
+                {filteredCommits.length}
+                {filteredCommits.length !== commits.length ? ` of ${commits.length}` : ""} commits
               </div>
             }
           />
           <div className="space-y-3">
-            {commits.map((commit, index) => (
+            {filteredCommits.map((commit, index) => (
               <CommitCard
                 key={commit.id}
                 hash={commit.hash}
@@ -114,11 +234,13 @@ export default function CommitsPage() {
                 delay={index * 0.04}
               />
             ))}
-            {commits.length === 0 && <p className="text-sm text-muted-foreground">No repository analyzed yet</p>}
+            {commits.length === 0 && <p className="text-sm text-muted-foreground">No commits loaded yet. Run analysis first.</p>}
+            {commits.length > 0 && filteredCommits.length === 0 && (
+              <p className="text-sm text-muted-foreground">No commits match your search or filters.</p>
+            )}
           </div>
         </FloatingGlowPanel>
       </PageContainer>
     </DashboardLayout>
   );
 }
-

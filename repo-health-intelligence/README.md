@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Repo Health Intelligence
 
-## Getting Started
+Full-stack repository analytics: Next.js frontend + FastAPI backend with Postgres, Redis, Neo4j, and Celery.
 
-First, run the development server:
+## Quick start (recommended)
+
+### 1. Backend stack
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd backend
+docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Service | URL |
+|---------|-----|
+| API | http://localhost:8000 |
+| Swagger | http://localhost:8000/docs |
+| Neo4j | http://localhost:7474 |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 2. Frontend
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cd ..
+cp .env.example .env.local   # optional
+npm install
+npm run dev
+```
 
-## Learn More
+Open http://localhost:3000, paste a **public** GitHub repository URL, and run analysis.
 
-To learn more about Next.js, take a look at the following resources:
+In local dev the frontend proxies `/api/v1/*` to `http://localhost:8000` (see `next.config.ts`). You do not need `NEXT_PUBLIC_API_BASE_URL` unless the API runs on another host.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Environment
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Copy [`.env.example`](.env.example) to `.env.local` when needed:
 
-## Deploy on Vercel
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_API_BASE_URL` | Direct API URL (skip proxy). Example: `http://localhost:8000/api/v1` |
+| `BACKEND_URL` | Proxy target for Next.js rewrites (Docker: `http://backend:8000`) |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Backend variables: [`backend/.env.example`](backend/.env.example).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Full stack with Docker (API + UI)
+
+```bash
+cd backend
+docker compose up --build
+```
+
+This starts Postgres, Redis, Neo4j, API, Celery worker, and the Next.js frontend on http://localhost:3000.
+
+## Architecture
+
+- **Frontend** (`src/lib/api.ts`) — REST client; job updates via WebSocket with HTTP polling fallback
+- **Backend** (`backend/app`) — analysis pipeline, metrics, graph storage
+- **Settings** — local preferences in `localStorage`; live backend health check on `/api/v1/healthz`
+
+## Analysis requirements
+
+Analysis completes only when **all** of these are running:
+
+1. FastAPI (`backend` or `uvicorn`)
+2. Celery worker (`celery -A app.tasks.celery_app.celery_app worker`)
+3. Postgres, Redis, Neo4j
+
+See [`backend/README.md`](backend/README.md) for API details and local (non-Docker) setup.
+
+## AI features
+
+LLM insights are intentionally disabled. Analytics endpoints (commits, hotspots, architecture, contributors, dependencies) are fully wired.
