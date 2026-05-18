@@ -1,8 +1,15 @@
 "use client";
 import { Bell, GitBranch, ChevronDown, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
+import { useRepositoryContext } from "@/context/repository-context";
 
 export function Topbar() {
+  const { repositoryOverview, currentJob } = useRepositoryContext();
+  const repoLabel = repositoryOverview?.full_name ?? "No repository analyzed yet";
+  const secondaryLabel = currentJob?.status
+    ? `${currentJob.status.replace(/_/g, " ")} • ${Math.round(currentJob.progress)}%`
+    : "Awaiting repository input";
+
   return (
     <motion.header
       initial={{ opacity: 0, y: -10 }}
@@ -12,12 +19,12 @@ export function Topbar() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 text-sm">
           <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="font-medium">acme-corp/nexus-platform</span>
+          <span className="font-medium">{repoLabel}</span>
           <ChevronDown className="w-3 h-3 text-muted-foreground" />
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 text-xs text-muted-foreground">
           <Calendar className="w-3 h-3" />
-          <span>Last 30 days</span>
+          <span>{secondaryLabel}</span>
           <ChevronDown className="w-3 h-3" />
         </div>
       </div>
