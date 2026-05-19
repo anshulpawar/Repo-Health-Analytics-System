@@ -1,0 +1,214 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Repository {
+  id              Int       @id @default(autoincrement())
+  name            String
+  url             String    @unique
+  defaultBranch   String    @default("main") @map("default_branch")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  lastAnalyzedAt  DateTime? @map("last_analyzed_at")
+
+  commits                 Commit[]
+  files                   File[]
+  hotspots                Hotspot[]
+  architectureViolations  ArchitectureViolation[]
+  contributors            Contributor[]
+  repositoryHealth        RepositoryHealth[]
+  dependencyRelationships DependencyRelationship[]
+  analysisJobs            AnalysisJob[]
+
+  @@map("repositories")
+}
+
+model Commit {
+  id            Int      @id @default(autoincrement())
+  repositoryId  Int      @map("repository_id")
+  hash          String
+  author        String
+  message       String
+  timestamp     DateTime
+  filesChanged  Int      @default(0) @map("files_changed")
+  additions     Int      @default(0)
+  deletions     Int      @default(0)
+
+  repository       Repository         @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  fileMetrics      FileMetric[]
+  repositoryHealth RepositoryHealth[]
+
+  @@unique([repositoryId, hash], name: "uq_repo_commit_hash")
+  @@index([repositoryId])
+  @@index([timestamp])
+  @@map("commits")
+}
+
+model File {
+  id                   Int    @id @default(autoincrement())
+  repositoryId         Int    @map("repository_id")
+  path                 String
+  language             String @default("unknown")
+  currentComplexity    Float  @default(0) @map("current_complexity")
+  maintainabilityIndex Float  @default(0) @map("maintainability_index")
+  churnScore           Float  @default(0) @map("churn_score")
+
+  repository           Repository             @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  fileMetrics          FileMetric[]
+  hotspots             Hotspot[]
+  contributorOwnership ContributorOwnership[]
+
+  @@unique([repositoryId, path], name: "uq_repo_file_path")
+  @@index([repositoryId])
+  @@map("files")
+}
+
+model FileMetric {
+  id               Int   @id @default(autoincrement())
+  fileId           Int   @map("file_id")
+  commitId         Int   @map("commit_id")
+  complexity       Float @default(0)
+  maintainability  Float @default(0)
+  linesOfCode      Int   @default(0) @map("lines_of_code")
+  couplingScore    Float @default(0) @map("coupling_score")
+  duplicationScore Float @default(0) @map("duplication_score")
+  testCoverage     Float @default(0) @map("test_coverage")
+
+  file   File   @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  commit Commit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+  @@index([commitId])
+  @@map("file_metrics")
+}
+
+model Hotspot {
+  id             Int    @id @default(autoincrement())
+  repositoryId   Int    @map("repository_id")
+  fileId         Int    @map("file_id")
+  hotspotScore   Float  @default(0) @map("hotspot_score")
+  riskLevel      String @default("low") @map("risk_level")
+  complexity     Float  @default(0)
+  churn          Float  @default(0)
+  ownershipRisk  Float  @default(0) @map("ownership_risk")
+  maintainability Float @default(0)
+  trend          String @default("stable")
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  file       File       @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+  @@index([hotspotScore])
+  @@map("hotspots")
+}
+
+model ArchitectureViolation {
+  id            Int      @id @default(autoincrement())
+  repositoryId  Int      @map("repository_id")
+  filePath      String   @map("file_path")
+  violationType String   @map("violation_type")
+  severity      String   @default("warning")
+  detectedAt    DateTime @default(now()) @map("detected_at")
+  source        String?
+  target        String?
+  layer         String?
+  description   String?
+  resolved      Boolean  @default(false)
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+  @@index([detectedAt])
+  @@map("architecture_violations")
+}
+
+model Contributor {
+  id              Int       @id @default(autoincrement())
+  repositoryId    Int       @map("repository_id")
+  name            String
+  email           String
+  commitCount     Int       @default(0) @map("commit_count")
+  ownershipScore  Float     @default(0) @map("ownership_score")
+  linesAdded      Int       @default(0) @map("lines_added")
+  linesRemoved    Int       @default(0) @map("lines_removed")
+  lastActive      DateTime? @map("last_active")
+
+  repository           Repository             @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  contributorOwnership ContributorOwnership[]
+
+  @@unique([repositoryId, email], name: "uq_repo_contributor_email")
+  @@index([repositoryId])
+  @@map("contributors")
+}
+
+model ContributorOwnership {
+  id                   Int   @id @default(autoincrement())
+  contributorId        Int   @map("contributor_id")
+  fileId               Int   @map("file_id")
+  ownershipPercentage  Float @default(0) @map("ownership_percentage")
+
+  contributor Contributor @relation(fields: [contributorId], references: [id], onDelete: Cascade)
+  file        File        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([contributorId, fileId], name: "uq_contributor_file_ownership")
+  @@map("contributor_ownership")
+}
+
+model RepositoryHealth {
+  id                   Int      @id @default(autoincrement())
+  repositoryId         Int      @map("repository_id")
+  commitId             Int?     @map("commit_id")
+  healthScore          Float    @default(0) @map("health_score")
+  riskScore            Float    @default(0) @map("risk_score")
+  couplingScore        Float    @default(0) @map("coupling_score")
+  complexityScore      Float    @default(0) @map("complexity_score")
+  maintainabilityScore Float    @default(0) @map("maintainability_score")
+  testCoverageScore    Float    @default(0) @map("test_coverage_score")
+  busFactor            Float    @default(0) @map("bus_factor")
+  hotspotSeverity      Float    @default(0) @map("hotspot_severity")
+  architectureScore    Float    @default(0) @map("architecture_score")
+  timestamp            DateTime @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  commit     Commit?    @relation(fields: [commitId], references: [id], onDelete: SetNull)
+
+  @@index([repositoryId])
+  @@index([timestamp])
+  @@map("repository_health")
+}
+
+model DependencyRelationship {
+  id               Int     @id @default(autoincrement())
+  repositoryId     Int     @map("repository_id")
+  sourceFile       String  @map("source_file")
+  targetFile       String  @map("target_file")
+  relationshipType String  @map("relationship_type")
+  isCyclic         Boolean @default(false) @map("is_cyclic")
+  weight           Float   @default(1)
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+  @@map("dependency_relationships")
+}
+
+model AnalysisJob {
+  id           Int       @id @default(autoincrement())
+  repositoryId Int       @map("repository_id")
+  status       String    @default("queued")
+  progress     Float     @default(0)
+  startedAt    DateTime  @default(now()) @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  errorMessage String?   @map("error_message")
+  metadataJson String    @default("{}") @map("metadata_json")
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+  @@index([status])
+  @@map("analysis_jobs")
+}

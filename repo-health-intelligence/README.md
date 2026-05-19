@@ -1,71 +1,67 @@
 # Repo Health Intelligence
 
-Full-stack repository analytics: Next.js frontend + FastAPI backend with Postgres, Redis, Neo4j, and Celery.
+Full-stack repository analytics on **Next.js + Node.js** — ready for **Vercel** deployment. No Docker required.
 
-## Quick start (recommended)
+## Stack
 
-### 1. Backend stack
+- **Next.js 16** (App Router, React 19)
+- **API**: Route Handlers at `/api/v1/*`
+- **Database**: Prisma + SQLite (local) or PostgreSQL (Vercel production)
+- **Analysis**: Node.js + `simple-git` (clone, parse, metrics)
 
-```bash
-cd backend
-docker compose up --build
-```
-
-| Service | URL |
-|---------|-----|
-| API | http://localhost:8000 |
-| Swagger | http://localhost:8000/docs |
-| Neo4j | http://localhost:7474 |
-
-### 2. Frontend
+## Quick start (local)
 
 ```bash
-cd ..
-cp .env.example .env.local   # optional
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000, paste a **public** GitHub repository URL, and run analysis.
+Open http://localhost:3000, paste a **public** GitHub URL, and run analysis.
 
-In local dev the frontend proxies `/api/v1/*` to `http://localhost:8000` (see `next.config.ts`). You do not need `NEXT_PUBLIC_API_BASE_URL` unless the API runs on another host.
+API docs: http://localhost:3000/api/v1/healthz → `{"status":"ok"}`
+
+## Deploy to Vercel
+
+1. Push this repo to GitHub.
+2. Import the project in [Vercel](https://vercel.com).
+3. Add **Vercel Postgres** (Storage → Create Database).
+4. Set environment variable `DATABASE_URL` to the Postgres connection string.
+5. In `prisma/schema.prisma`, change:
+   ```prisma
+   provider = "postgresql"
+   ```
+6. Deploy. The build runs `prisma db push` to create tables.
+
+Optional: set `MAX_COMMITS_PER_ANALYSIS=50` on the Hobby plan to stay within function time limits.
 
 ## Environment
 
-Copy [`.env.example`](.env.example) to `.env.local` when needed:
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | `file:./prisma/dev.db` (local) or Postgres URL (Vercel) |
+| `MAX_COMMITS_PER_ANALYSIS` | Max git commits to process (default `80`) |
 
-| Variable | Purpose |
-|----------|---------|
-| `NEXT_PUBLIC_API_BASE_URL` | Direct API URL (skip proxy). Example: `http://localhost:8000/api/v1` |
-| `BACKEND_URL` | Proxy target for Next.js rewrites (Docker: `http://backend:8000`) |
+## API routes
 
-Backend variables: [`backend/.env.example`](backend/.env.example).
+All endpoints live under `/api/v1`:
 
-## Full stack with Docker (API + UI)
+- `GET /healthz`
+- `POST /repositories/analyze`
+- `GET /repositories`, `/repositories/{id}/overview`, `/repositories/{id}/jobs/latest`
+- `GET /dashboard/{id}`, `/timeline`, `/modules`
+- `GET /commits/{id}`, `/commits/{id}/stats`
+- `GET /hotspots/{id}`, `/hotspots/{id}/summary`
+- `GET /contributors/{id}`, `/stats`, `/ownership`, `/warnings`
+- `GET /dependencies/{id}`
+- `GET /architecture/{id}/summary`, `/violations`
+- `GET /insights/{id}`
+- `GET /jobs/{id}`
 
-```bash
-cd backend
-docker compose up --build
-```
+## Legacy Python backend
 
-This starts Postgres, Redis, Neo4j, API, Celery worker, and the Next.js frontend on http://localhost:3000.
-
-## Architecture
-
-- **Frontend** (`src/lib/api.ts`) — REST client; job updates via WebSocket with HTTP polling fallback
-- **Backend** (`backend/app`) — analysis pipeline, metrics, graph storage
-- **Settings** — local preferences in `localStorage`; live backend health check on `/api/v1/healthz`
-
-## Analysis requirements
-
-Analysis completes only when **all** of these are running:
-
-1. FastAPI (`backend` or `uvicorn`)
-2. Celery worker (`celery -A app.tasks.celery_app.celery_app worker`)
-3. Postgres, Redis, Neo4j
-
-See [`backend/README.md`](backend/README.md) for API details and local (non-Docker) setup.
+The `backend/` folder contains the original FastAPI implementation (reference only). The active API is implemented in `src/app/api/v1` and `src/server/`.
 
 ## AI features
 
-LLM insights are intentionally disabled. Analytics endpoints (commits, hotspots, architecture, contributors, dependencies) are fully wired.
+LLM insights are placeholders. Commit, hotspot, architecture, contributor, and dependency analytics are fully implemented in Node.js.
