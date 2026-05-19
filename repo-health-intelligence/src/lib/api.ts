@@ -7,7 +7,7 @@ export type AnalysisJobStatus =
   | "completed"
   | "failed";
 
-/** Resolves API root; uses same-origin proxy in the browser when env is unset. */
+/** Resolves API root (Next.js Route Handlers under /api/v1). */
 export function getApiBaseUrl(): string {
   if (process.env.NEXT_PUBLIC_API_BASE_URL) {
     return process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
@@ -15,7 +15,8 @@ export function getApiBaseUrl(): string {
   if (typeof window !== "undefined") {
     return `${window.location.origin}/api/v1`;
   }
-  return "http://localhost:8000/api/v1";
+  const host = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000";
+  return `${host}/api/v1`;
 }
 
 function getApiOrigin(): string {

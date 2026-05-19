@@ -263,7 +263,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
-              Commit, hotspot, architecture, contributor, and dependency data are served by the FastAPI backend. The insights feed
+              Commit, hotspot, architecture, contributor, and dependency data are served by the Next.js API. The insights feed
               returns structured placeholders until the AI pipeline under <code className="text-cyan-300">app/ai/</code> is enabled.
             </p>
           </FloatingGlowPanel>
