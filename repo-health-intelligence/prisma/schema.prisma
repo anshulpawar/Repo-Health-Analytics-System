@@ -23,6 +23,7 @@ model Repository {
   repositoryHealth        RepositoryHealth[]
   dependencyRelationships DependencyRelationship[]
   analysisJobs            AnalysisJob[]
+  aiInsights              AiInsight[]
 
   @@map("repositories")
 }
@@ -211,4 +212,24 @@ model AnalysisJob {
   @@index([repositoryId])
   @@index([status])
   @@map("analysis_jobs")
+}
+
+model AiInsight {
+  id             Int      @id @default(autoincrement())
+  repositoryId   Int      @map("repository_id")
+  insightId      String   @map("insight_id")
+  title          String
+  description    String
+  category       String   @default("recommendation")
+  severity       String   @default("info")
+  recommendation String
+  impact         String
+  priority       String   @default("Medium")
+  effort         String   @default("Medium")
+  generatedAt    DateTime @default(now()) @map("generated_at")
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+  @@map("ai_insights")
 }

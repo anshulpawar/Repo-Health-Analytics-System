@@ -227,7 +227,7 @@ export default function DashboardPage() {
           </FloatingGlowPanel>
 
           <FloatingGlowPanel className="p-5" glowColor="purple" delay={0.25}>
-            <SectionHeader title="AI Insight" description="Placeholder for future AI-generated analysis" action={<span className="flex items-center gap-1 text-xs text-cyan-400"><Zap className="w-3 h-3" /> Reserved</span>} />
+            <SectionHeader title="AI Insight" description="AI-generated analysis powered by Groq" action={<span className="flex items-center gap-1 text-xs text-cyan-400"><Zap className="w-3 h-3" />AI Powered</span>} />
             <InsightCard
               title={dashboard?.ai_insight_placeholder.title ?? "AI insights pending"}
               description={dashboard?.ai_insight_placeholder.description ?? "No repository analyzed yet"}
