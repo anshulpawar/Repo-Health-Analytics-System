@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db";
 import { extractOwnerRepo, normalizeGithubUrl } from "@/server/github";
 import { riskLevelFromScore } from "@/server/scoring";
+import { getOrGenerateInsights, generateAndStoreInsights, getCachedInsights } from "@/server/ai-service";
 
 const NO_DATA = "No repository analyzed yet";
 const LANG_COLORS = ["#3178c6", "#3572A5", "#00ADD8", "#fbbf24", "#34d399", "#a78bfa", "#6b7280"];
@@ -104,16 +105,7 @@ export async function getDashboard(repositoryId: number) {
     })),
     churn_complexity: churnComplexity,
     top_commit_ids: topCommits.map((c) => c.id),
-    ai_insight_placeholder: {
-      title: "AI insights not enabled",
-      description: "Pipeline reserves AI slots but no LLM execution is active.",
-      category: "recommendation",
-      severity: "info" as const,
-      timestamp: new Date().toISOString(),
-      recommendation: "Use hotspot and architecture pages for actionable insights.",
-      impact: `Current health score: ${latest.healthScore.toFixed(2)} (${change >= 0 ? "+" : ""}${change.toFixed(2)} vs previous snapshot).`,
-      placeholder: true,
-    },
+    ai_insight_placeholder: await buildDashboardAiInsight(repositoryId, latest.healthScore, change),
   };
 }
 
@@ -135,12 +127,12 @@ function emptyDashboard(repositoryId: number) {
     churn_complexity: [],
     top_commit_ids: [],
     ai_insight_placeholder: {
-      title: "AI insights not enabled",
-      description: "AI integration is reserved for a future phase.",
+      title: "No analysis data available",
+      description: "Submit a repository for analysis to generate AI-powered insights.",
       category: "recommendation",
       severity: "info" as const,
       timestamp: new Date().toISOString(),
-      recommendation: "Enable AI service integration in future releases.",
+      recommendation: "Enter a GitHub repository URL to begin analysis.",
       impact: "No AI insights are generated yet.",
       placeholder: true,
     },
@@ -486,27 +478,57 @@ export async function getInsights(repositoryId: number) {
   if (!latest) {
     return { has_data: false, no_data_message: NO_DATA, insights: [], predictions: [], recommendations: [] };
   }
+
+  const aiInsights = await getOrGenerateInsights(repositoryId);
+  const now = new Date().toISOString();
+
+  const insights = aiInsights.map((insight) => ({
+    id: insight.id,
+    title: insight.title,
+    description: insight.description,
+    category: insight.category as "health" | "architecture" | "complexity" | "risk" | "recommendation",
+    severity: insight.severity as "info" | "warning" | "critical",
+    timestamp: now,
+    recommendation: insight.recommendation,
+    impact: insight.impact,
+    placeholder: false,
+  }));
+
+  // Build predictions from critical/warning insights
+  const predictions = aiInsights
+    .filter((i) => i.severity === "critical" || i.severity === "warning")
+    .slice(0, 4)
+    .map((i) => ({
+      title: i.title,
+      risk: i.severity === "critical" ? "High" : "Medium",
+      description: i.description,
+      category: i.category,
+    }));
+
+  // Build recommendations sorted by priority
+  const priorityOrder: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+  const recommendations = [...aiInsights]
+    .sort((a, b) => (priorityOrder[a.priority] ?? 3) - (priorityOrder[b.priority] ?? 3))
+    .slice(0, 6)
+    .map((i) => ({
+      title: i.title,
+      effort: i.effort,
+      impact: i.impact,
+      priority: i.priority,
+    }));
+
   return {
     has_data: true,
     no_data_message: "",
-    insights: [
-      {
-        id: "ai-placeholder-1",
-        title: "AI insights pipeline placeholder",
-        description: "AI/LLM insights are intentionally disabled for this release.",
-        category: "recommendation",
-        severity: "info",
-        timestamp: new Date().toISOString(),
-        recommendation: "Use commit, hotspot, architecture, and contributor analytics while AI is pending.",
-        impact: "No AI-generated summaries or predictions are executed.",
-        placeholder: true,
-      },
-    ],
-    predictions: [],
-    recommendations: [
-      { title: "Future AI endpoint ready", effort: "N/A", impact: "Fast integration path", priority: "High" },
-    ],
+    insights,
+    predictions,
+    recommendations,
   };
+}
+
+export async function regenerateInsights(repositoryId: number) {
+  const insights = await generateAndStoreInsights(repositoryId);
+  return { regenerated: insights.length, insights };
 }
 
 export async function getJob(jobId: number) {
@@ -547,6 +569,7 @@ export async function createAnalysisJob(repositoryId: number, metadata: Record<s
 }
 
 export async function clearRepositoryAnalysis(repositoryId: number) {
+  await prisma.aiInsight.deleteMany({ where: { repositoryId } });
   await prisma.analysisJob.deleteMany({ where: { repositoryId } });
   await prisma.repositoryHealth.deleteMany({ where: { repositoryId } });
   await prisma.hotspot.deleteMany({ where: { repositoryId } });
@@ -644,4 +667,43 @@ function layerFromPath(filePath: string): string {
   if (lowered.includes("/db/")) return "data";
   if (lowered.includes("/infra/")) return "infrastructure";
   return "business";
+}
+
+async function buildDashboardAiInsight(
+  repositoryId: number,
+  healthScore: number,
+  change: number
+) {
+  // Try to get the most critical cached AI insight for the dashboard card
+  const cached = await getCachedInsights(repositoryId);
+  if (cached && cached.length > 0) {
+    // Pick the highest severity insight (critical > warning > info)
+    const severityOrder: Record<string, number> = { critical: 0, warning: 1, info: 2 };
+    const sorted = [...cached].sort(
+      (a, b) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2)
+    );
+    const top = sorted[0]!;
+    return {
+      title: top.title,
+      description: top.description,
+      category: top.category,
+      severity: top.severity as "info" | "warning" | "critical",
+      timestamp: new Date().toISOString(),
+      recommendation: top.recommendation,
+      impact: top.impact,
+      placeholder: false,
+    };
+  }
+
+  // No cached insights – show a summary with real score data
+  return {
+    title: "AI Insights Available",
+    description: `Repository health score is ${healthScore.toFixed(1)} (${change >= 0 ? "+" : ""}${change.toFixed(1)} vs previous). Visit the Insights page to view AI-generated recommendations.`,
+    category: "recommendation",
+    severity: (healthScore < 40 ? "critical" : healthScore < 65 ? "warning" : "info") as "info" | "warning" | "critical",
+    timestamp: new Date().toISOString(),
+    recommendation: "Navigate to AI Insights page for detailed analysis and actionable recommendations to improve your repository health.",
+    impact: `Current health: ${healthScore.toFixed(1)}/100. AI analysis will identify specific files and patterns to improve.`,
+    placeholder: false,
+  };
 }

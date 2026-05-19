@@ -1,5 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 
+import { generateAndStoreInsights } from "@/server/ai-service";
 import { parseAndValidateGithubUrl } from "@/server/github";
 import { runAnalysisPipeline } from "@/server/pipeline";
 import * as services from "@/server/services";
@@ -151,12 +152,26 @@ async function handlePost(segments: string[], request: NextRequest) {
           forceReanalyze: body.force_reanalyze,
           maxCommits: body.max_commits,
         });
+        // Auto-generate AI insights after successful analysis
+        try {
+          await generateAndStoreInsights(repositoryId);
+          console.log(`[ai-insights] Generated insights for repository ${repositoryId}`);
+        } catch (aiErr) {
+          console.error("[ai-insights] Failed to generate AI insights:", aiErr);
+        }
       } catch (err) {
         console.error("[analysis]", err);
       }
     });
 
     return json({ repository_id: repositoryId, job_id: jobId, status: "queued" });
+  }
+
+  // POST /insights/{repositoryId}/regenerate - Force-regenerate AI insights
+  if (segments[0] === "insights" && segments[1] && segments[2] === "regenerate") {
+    const repositoryId = parseId(segments[1], "repository id");
+    const result = await services.regenerateInsights(repositoryId);
+    return json(result);
   }
 
   return errorResponse("Not found", 404);

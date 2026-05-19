@@ -360,5 +360,7 @@ export const api = {
   getArchitectureViolations: (repositoryId: number) =>
     apiRequest<ArchitectureViolationData[]>(`/architecture/${repositoryId}/violations`),
   getInsights: (repositoryId: number) => apiRequest<InsightsData>(`/insights/${repositoryId}`),
+  regenerateInsights: (repositoryId: number) =>
+    apiRequest<{ regenerated: number; insights: unknown[] }>(`/insights/${repositoryId}/regenerate`, { method: "POST" }),
 };
 
